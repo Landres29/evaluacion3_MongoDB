@@ -339,3 +339,223 @@ if __name__ == "__main__":
     # Inicialización del aplicativo
     db_mongo = conectar()
     menu_principal(db_mongo)
+
+
+
+"""Plantilla 1: Para consultas de FILTROS (Coincidencia exacta)
+La usas si te pide buscar valores fijos. Ej: "Buscar eventos en el 'Auditorio A'" o "Invitados con estado 'activo'".
+
+Python"""
+def opcion_filtro_inacap(db):
+    separar("Consulta de Filtros Básicos")
+    
+    # 1. Capturamos el dato que te dicte la profesora en el examen
+    valor_buscar = input("Ingrese el valor exacto a filtrar: ").strip()
+    
+    try:
+        # 2. LA ESTRUCTURA DEL FILTRO
+        filtro = {
+            "categoria": valor_buscar  # <=== CAMBIAR AQUÍ: Reemplaza "categoria" por el campo que te pida la profe (ej: "lugar", "estado", "empresa")
+        }
+        
+        # 3. Se ejecuta la consulta (No cambies db.eventos a menos que te pida buscar en la colección db.invitados)
+        resultados = db.eventos.find(filtro)  # <=== CAMBIAR AQUÍ: Si te pide buscar invitados directos, cambia db.eventos por db.invitados
+        
+        print("\nResultados encontrados:")
+        for doc in resultados:
+            # 4. Mostrar los datos en pantalla
+            print(f" -> {doc['nombre']}") # <=== CAMBIAR AQUÍ: Cambia "nombre" por el campo que quieras mostrar (ej: doc['lugar'] o doc['correo'])
+            
+    except Exception as e:
+        print(f" Error en la consulta: {e}")
+    pausar()
+"""Plantilla 2: Para consultas de EXPRESIONES REGULARES ($regex)
+La usas si te pide búsquedas parciales. Ej: "Nombres que empiecen con 'Ma'" o "Correos que terminen en '@inacap.cl'".
+
+Python"""
+def opcion_regex_inacap(db):
+    separar("Consulta con Expresiones Regulares ($regex)")
+    texto_parcial = input("Ingrese el texto parcial a buscar: ").strip()
+    
+    try:
+        # 2. LA ESTRUCTURA REGEX
+        filtro_regex = {
+            "nombre": {  # <=== CAMBIAR AQUÍ: Reemplaza "nombre" por el campo de texto a evaluar (ej: "correo", "rut", "empresa")
+                "$regex": f"^{texto_parcial}", # <=== TORPEDO DE CLASES: Deja el '^' si te pide "que empiece con". Borra el '^' si te pide "que contenga". Pon un '$' al final si te pide "que termine en" (ej: f"{texto_parcial}$")
+                "$options": "i" # La 'i' de INACAP: No la toques, sirve para ignorar mayúsculas/minúsculas
+            }
+        }
+        
+        # 3. Se ejecuta la consulta
+        resultados = db.eventos.find(filtro_regex) # <=== CAMBIAR AQUÍ: Si te pide buscar en invitados maestros, cambia db.eventos por db.invitados
+        
+        print("\nResultados coincidentes:")
+        for doc in resultados:
+            # 4. Mostrar los datos en pantalla
+            print(f" -> {doc['nombre']}") # <=== CAMBIAR AQUÍ: Cambia "nombre" por la propiedad que quieras listar en la terminal
+            
+    except Exception as e:
+        print(f" Error en la consulta: {e}")
+    pausar()
+"""Plantilla 3: Para subconsultas con $lookup (Cruzar colecciones)
+La usas si te pide relacionar datos de ambas colecciones a la vez. Ej: "Mostrar el nombre real del invitado y el nombre del evento al que asiste".
+
+Python"""
+def opcion_lookup_inacap(db):
+    separar("Subconsulta Relacional ($lookup)")
+    try:
+        # 1. EL PIPELINE (La lista de etapas)
+        pipeline = [
+            # Etapa A: Desarmamos el array interno de invitados que está en los eventos
+            {"$unwind": "$invitados"}, # No lo toques, es obligatorio para abrir el array RUT por RUT
+            
+            # Etapa B: El $lookup (El JOIN de base de datos)
+            {"$lookup": {
+                "from": "invitados",           # <=== REVISAR: Es la colección foránea. En tu certamen se llama "invitados", no deberías cambiarlo.
+                "localField": "invitados.rut",  # <=== REVISAR: El campo clave en el subdocumento del evento.
+                "foreignField": "rut",          # <=== REVISAR: El campo clave coincidente en la colección de invitados.
+                "as": "info_invitado"           # <=== REVISAR: El nombre de la "caja" temporal donde se guarda el cruce. Puedes dejarlo así.
+            }},
+            
+            # Etapa C: Aplanamos el array que nos devolvió el $lookup para poder leerlo directo
+            {"$unwind": "$info_invitado"}, # No lo toques, es obligatorio en la materia de INACAP
+            
+            # Etapa D: EL FILTRO POST-CRUCE (Opcional por si la profe te pide algo específico)
+            # EJEMPLO: Si te dice "solo de la empresa INACAP", descomentas la línea de abajo:
+            # {"$match": {"info_invitado.empresa": "INACAP"}}, # <=== CAMBIAR AQUÍ: Si te pide filtrar tras el cruce, cambia "info_invitado.empresa" por el campo físico (ej: "info_invitado.estado" o "lugar")
+            
+            # Etapa E: Limpieza de campos ($project)
+            {"$project": {
+                "_id": 0, # Deja el 0 para ocultar el código feo de Mongo
+                "Evento": "$nombre",                  # <=== CAMBIAR AQUÍ: Crea los nombres que quieras. "$nombre" es el nombre del evento.
+                "NombreInvitado": "$info_invitado.nombre", # <=== CAMBIAR AQUÍ: "$info_invitado.nombre" trae el nombre real desde la otra colección.
+                "RutInvitado": "$info_invitado.rut"   # <=== CAMBIAR AQUÍ: Agrega o quita los campos que te pida listar la profesora.
+            }}
+        ]
+        
+        # 2. Se ejecuta con .aggregate() y se convierte a lista obligatoriamente
+        resultados = list(db.eventos.aggregate(pipeline))
+        
+        print("\nDatos cruzados obtenidos con éxito:")
+        for doc in resultados:
+            # 3. Se imprimen usando los nombres exactos que inventaste arriba en la Etapa E ($project)
+            print(f" -> Evento: {doc['Evento']} | Asiste: {doc['NombreInvitado']} (RUT: {doc['RutInvitado']})") # <=== CAMBIAR AQUÍ: Modifica el texto del print usando las claves que pusiste en el $project
+            
+    except Exception as e:
+        print(f" Error en subconsulta: {e}")
+    pausar()
+
+"""cd desktop, cd EVALUACION3_MONGODB
+   pip install pymongo
+    python nombre_archivo.py """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def consulta_1_correos_confirmados(db):
+    separar("Consulta 1: Correos de Invitados Confirmados ($lookup)")
+    
+    # 1. Capturamos el nombre del evento que te pida la profesora
+    nombre_evento = input("  Ingrese el nombre del evento (ej: Expo Inacap): ").strip()
+    
+    try:
+        # 2. El Pipeline con todas las etapas de la materia de INACAP
+        pipeline = [
+            # Etapa A: Filtramos para quedarnos SOLO con el evento que escribió la profe
+            {"$match": {"nombre": {"$regex": nombre_evento, "$options": "i"}}},
+            
+            # Etapa B: Desarmamos el array de invitados interno del evento
+            {"$unwind": "$invitados"},
+            
+            # Etapa C: Filtramos para dejar SOLO los que están "confirmado" en el evento
+            {"$match": {"invitados.estado": "confirmado"}},
+            
+            # Etapa D: El $lookup para traer los datos reales (como el correo) desde la colección invitados
+            {"$lookup": {
+                "from": "invitados",
+                "localField": "invitados.rut",
+                "foreignField": "rut",
+                "as": "perfil_maestro"
+            }},
+            
+            # Etapa E: Aplanamos el array que nos devolvió el lookup
+            {"$unwind": "$perfil_maestro"},
+            
+            # Etapa F: Limpiamos la pantalla con $project para mostrar solo lo pedido
+            {"$project": {
+                "_id": 0,
+                "Evento": "$nombre",
+                "Invitado": "$perfil_maestro.nombre",
+                "Correo": "$perfil_maestro.correo"
+            }}
+        ]
+        
+        # 3. Ejecutamos la agregación y la pasamos a una lista
+        resultados = list(db.eventos.aggregate(pipeline))
+        
+        if not resultados:
+            print(f"\n  No se encontraron invitados confirmados para el evento '{nombre_evento}'.")
+        else:
+            print("\n  Invitados Confirmados y sus Correos:")
+            for doc in resultados:
+                print(f"  • Evento: {doc['Evento']} | {doc['Invitado']} -> Correo: {doc['Correo']}")
+                
+    except Exception as e:
+        print(f"  [Error] Falló la subconsulta: {e}")
+    pausar()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def consulta_2_categoria_evento(db):
+    separar("Consulta 2: Categoría del Evento (Filtro)")
+    
+    # 1. Capturamos el nombre del evento
+    nombre_evento = input("  Ingrese el nombre del evento a consultar: ").strip()
+    
+    try:
+        # 2. Creamos el filtro usando una Expresión Regular por si no lo escribe exacto
+        filtro = {
+            "nombre": {"$regex": nombre_evento, "$options": "i"}
+        }
+        
+        # 3. Ejecutamos con .find() y proyectamos solo el nombre y la categoría
+        resultados = db.eventos.find(filtro, {"nombre": 1, "categoria": 1, "_id": 0})
+        
+        # Convertimos a lista para saber si encontró algo
+        lista_resultados = list(resultados)
+        
+        if len(lista_resultados) == 0:
+            print(f"\n  No se encontró ningún evento con el nombre '{nombre_evento}'.")
+        else:
+            print("\n  Resultados de la búsqueda:")
+            for ev in lista_resultados:
+                print(f"  • Evento: {ev['nombre']} | Categoría: {ev['categoria'].upper()}")
+                
+    except Exception as e:
+        print(f"  [Error] Falló el filtro: {e}")
+    pausar()
